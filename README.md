@@ -8,6 +8,28 @@
 
 ---
 
+## 🤖 Quick Setup with Hermes
+
+**Already have Hermes Agent installed?** Just give it this repo link and say:
+
+> "Set up Pocket Hermes from https://github.com/rajgolepu/pocket-hermes"
+
+Hermes will automatically:
+1. Download all scripts from the `scripts/` folder
+2. Configure the background service
+3. Set up the boot script
+4. Create the wake checker cron job
+5. Build and serve the dashboard
+
+**You just need to:**
+- Get your Telegram bot token from [@BotFather](https://t.me/BotFather)
+- Get your Opengateway API key (see below)
+- Set Android permissions (battery unrestricted, open Termux:Boot once)
+
+Everything else is automated.
+
+---
+
 ## 📖 The Story
 
 It started with a simple question: *What if I could talk to an AI assistant anytime, from anywhere, without opening an app or paying for cloud servers?*
@@ -71,7 +93,9 @@ What happened next surprised me.
 
 ---
 
-## 🚀 Quick Start
+## 🚀 Manual Setup
+
+If you prefer to set up manually (or want to understand each step):
 
 ### Prerequisites
 
@@ -115,7 +139,7 @@ hermes config set telegram.home_chat_id YOUR_CHAT_ID_HERE
 
 ### Step 3: Get a Free AI Model (Opengateway)
 
-This is where the magic happens. We use **Opengateway by gitlawb** — a free, unlimited AI inference gateway sponsored by Xiaomi MiMo.
+We use **Opengateway by gitlawb** — a free, unlimited AI inference gateway sponsored by Xiaomi MiMo.
 
 **How to get your API key:**
 
@@ -127,19 +151,10 @@ This is where the magic happens. We use **Opengateway by gitlawb** — a free, u
 **Configure Hermes to use Opengateway via custom provider:**
 
 ```bash
-# Set the model to mimo-v2.5-pro
 hermes config set model.default mimo-v2.5-pro
-
-# Set the provider to custom
 hermes config set model.provider custom
-
-# Set the base URL to Opengateway
 hermes config set model.base_url https://opengateway.gitlawb.com/v1
-
-# Set the API mode
 hermes config set model.api_mode chat_completions
-
-# Set your API key
 hermes config set model.api_key YOUR_OGw_API_KEY_HERE
 ```
 
@@ -156,201 +171,48 @@ model:
 
 **Alternative Free AI Providers:**
 
-You can use any OpenAI-compatible API with Hermes. Some options:
-
-| Provider | Free Tier | How to Get |
-|----------|-----------|------------|
-| **Opengateway** | Unlimited (sponsored by Xiaomi MiMo) | [gitlawb.com/opengateway](https://gitlawb.com/opengateway) |
-| **Google Gemini** | Free API access | [aistudio.google.com](https://aistudio.google.com) |
-| **Groq** | Free tier with fast inference | [console.groq.com](https://console.groq.com) |
-| **Mistral** | Free tier available | [console.mistral.ai](https://console.mistral.ai) |
-| **DeepSeek** | ~500M tokens free | [platform.deepseek.com](https://platform.deepseek.com) |
-| **OpenRouter** | $1 free credit | [openrouter.ai](https://openrouter.ai) |
-| **Together.ai** | $25 free credits | [api.together.xyz](https://api.together.xyz) |
-
-Just swap the `base_url` and `api_key` in your config to use any of these.
+You can use any OpenAI-compatible API with Hermes. Just swap the `base_url` and `api_key` in your config. Some options: Google Gemini, Groq, Mistral, DeepSeek, OpenRouter, Together.ai, Fireworks, Replicate, Perplexity, Cohere.
 
 ### Step 4: Set Up Background Service
+
+Install required packages and copy the scripts:
 
 ```bash
 # Install required packages
 pkg install termux-services -y
 
-# Create the runit service directory
+# Create directories
 mkdir -p ~/.termux/services/hermes-gateway
-
-# Create the service run script
-cat > ~/.termux/services/hermes-gateway/run << 'EOF'
-#!/data/data/com.termux/files/usr/bin/bash
-# Hermes Gateway supervised service
-# Managed by runit (termux-services)
-# Automatically restarted if killed
-
-# Acquire wake lock to prevent Android from suspending Termux
-termux-wake-lock
-
-# Source the Hermes venv
-source "$HOME/.hermes/hermes-agent/venv/bin/activate"
-
-# Run gateway in foreground (runit supervises this process)
-exec hermes gateway run
-EOF
-
-# Make it executable
-chmod +x ~/.termux/services/hermes-gateway/run
-
-# Create the boot script for auto-start on phone restart
 mkdir -p ~/.termux/boot
+mkdir -p ~/.hermes/scripts
 
-cat > ~/.termux/boot/hermes-gateway << 'EOF'
-#!/data/data/com.termux/files/usr/bin/bash
-# Hermes Gateway - Termux:Boot startup script
-# Starts runsvdir which supervises the gateway service
+# Copy scripts from this repo
+cp scripts/hermes-gateway-run.sh ~/.termux/services/hermes-gateway/run
+cp scripts/boot-hermes-gateway.sh ~/.termux/boot/hermes-gateway
+cp scripts/hermes-daemon.sh ~/.hermes/hermes-daemon.sh
+cp scripts/wake-checker.sh ~/.hermes/scripts/wake-checker.sh
+cp scripts/dashboard-build.py ~/.hermes/scripts/dashboard-build.py
+cp scripts/dashboard-serve.py ~/.hermes/scripts/dashboard-serve.py
+cp scripts/dashboard.sh ~/.hermes/scripts/dashboard.sh
 
-BOOT_LOG="$HOME/.hermes/logs/boot.log"
-SLEEP_FLAG="$HOME/.hermes/.gateway_sleep"
-GATEWAY_SERVICE="$HOME/.termux/services/hermes-gateway"
-CHAT_ID="YOUR_CHAT_ID_HERE"
-
-echo "=== $(date): Boot script started ===" >> "$BOOT_LOG"
-
-# Check if gateway is in sleep mode
-if [ -f "$SLEEP_FLAG" ]; then
-    echo "$(date): Sleep flag found, gateway will stay down" >> "$BOOT_LOG"
-    echo "=== $(date): Boot complete (sleep mode) ===" >> "$BOOT_LOG"
-    exit 0
-fi
-
-# Acquire wake lock so Android doesn't suspend Termux
-if command -v termux-wake-lock &>/dev/null; then
-    termux-wake-lock
-    echo "$(date): wake lock acquired" >> "$BOOT_LOG"
-fi
-
-# Wait for Termux to fully initialize
-sleep 10
-
-# Check if runsvdir is already running
-if pgrep -f "runsvdir.*termux/services" > /dev/null 2>&1; then
-    echo "$(date): runsvdir already running, checking service..." >> "$BOOT_LOG"
-else
-    # Start runsvdir — it will auto-start our gateway service
-    echo "$(date): Starting runsvdir..." >> "$BOOT_LOG"
-    runsvdir "$HOME/.termux/services" &>/dev/null &
-    sleep 5
-    echo "$(date): runsvdir started (PID: $!)" >> "$BOOT_LOG"
-fi
-
-# Wait for gateway to come up
-sleep 15
-
-# Verify gateway service is up
-if sv status "$GATEWAY_SERVICE" 2>/dev/null | grep -q "run:"; then
-    echo "$(date): Gateway service is RUNNING" >> "$BOOT_LOG"
-
-    # Send Telegram notification: "I'm ready"
-    TOKEN=$(grep "^TELEGRAM_BOT_TOKEN=" "$HOME/.hermes/.env" | cut -d= -f2-)
-    if [ -n "$TOKEN" ]; then
-        MESSAGE="🟢 Hermes is ready! I'm back online after the restart.
-Say \"sleep\" to put me to sleep, or just chat normally."
-        curl -s -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" \
-            -d "chat_id=${CHAT_ID}" \
-            -d "text=${MESSAGE}" \
-            -d "parse_mode=Markdown" \
-            -o /dev/null &
-        echo "$(date): Telegram notification sent" >> "$BOOT_LOG"
-    else
-        echo "$(date): Could not read bot token" >> "$BOOT_LOG"
-    fi
-else
-    echo "$(date): Gateway service status: $(sv status $GATEWAY_SERVICE 2>&1)" >> "$BOOT_LOG"
-fi
-
-echo "=== $(date): Boot complete ===" >> "$BOOT_LOG"
-EOF
-
-# Make it executable
+# Make all scripts executable
+chmod +x ~/.termux/services/hermes-gateway/run
 chmod +x ~/.termux/boot/hermes-gateway
-
-# Create the management script
-mkdir -p ~/.hermes
-
-cat > ~/.hermes/hermes-daemon.sh << 'EOF'
-#!/data/data/com.termux/files/usr/bin/bash
-# Hermes Gateway Daemon for Termux
-# Manages the runit-supervised gateway service
-
-SERVICE_DIR="$HOME/.termux/services/hermes-gateway"
-
-cmd_start() {
-    if [ -f "$SERVICE_DIR/run" ]; then
-        if sv status "$SERVICE_DIR" 2>/dev/null | grep -q "run:"; then
-            echo "✓ Gateway is already running (supervised by runsv)"
-            sv status "$SERVICE_DIR"
-        else
-            echo "Starting supervised gateway service..."
-            sv start "$SERVICE_DIR"
-            sleep 3
-            sv status "$SERVICE_DIR"
-        fi
-    else
-        echo "✗ Service not found at $SERVICE_DIR"
-        exit 1
-    fi
-}
-
-cmd_stop() {
-    if [ -f "$SERVICE_DIR/run" ]; then
-        sv stop "$SERVICE_DIR"
-        sleep 2
-        echo "✓ Gateway stopped"
-    fi
-    termux-wake-unlock 2>/dev/null || true
-}
-
-cmd_restart() {
-    if [ -f "$SERVICE_DIR/run" ]; then
-        sv restart "$SERVICE_DIR"
-        sleep 3
-        sv status "$SERVICE_DIR"
-    fi
-}
-
-cmd_status() {
-    echo "── Hermes Gateway (Termux) ──"
-    if [ -f "$SERVICE_DIR/run" ]; then
-        sv status "$SERVICE_DIR" 2>/dev/null || echo "down"
-    else
-        echo "✗ Service not configured"
-    fi
-    echo ""
-    echo "  Commands: hermes-daemon {start|stop|restart|status|logs}"
-}
-
-cmd_logs() {
-    tail -n 50 "$HOME/.hermes/logs/gateway-daemon.log" 2>/dev/null || echo "No log file found"
-}
-
-case "${1:-status}" in
-    start)   cmd_start ;;
-    stop)    cmd_stop ;;
-    restart) cmd_restart ;;
-    status)  cmd_status ;;
-    logs)    cmd_logs ;;
-    *)
-        echo "Usage: $0 {start|stop|restart|status|logs}"
-        exit 1
-        ;;
-esac
-EOF
-
-# Make it executable
 chmod +x ~/.hermes/hermes-daemon.sh
+chmod +x ~/.hermes/scripts/*.sh
+chmod +x ~/.hermes/scripts/*.py
 
-# Add alias to bashrc
+# Add aliases to bashrc
 mkdir -p ~/.bashrc.d
 echo 'alias hermes-daemon="bash ~/.hermes/hermes-daemon.sh"' >> ~/.bashrc.d/hermes-daemon
+echo 'alias dashboard="bash ~/.hermes/scripts/dashboard.sh"' >> ~/.bashrc.d/hermes-daemon
 echo '[ -f ~/.bashrc.d/hermes-daemon ] && . ~/.bashrc.d/hermes-daemon' >> ~/.bashrc
+```
+
+**Edit the boot script** — replace `YOUR_CHAT_ID_HERE` with your actual Telegram chat ID:
+
+```bash
+nano ~/.termux/boot/hermes-gateway
 ```
 
 ### Step 5: Set Android Permissions
@@ -374,6 +236,22 @@ hermes-daemon status
 1. Close Termux entirely (swipe away from recent apps)
 2. Send a message to your Telegram bot
 3. If the agent responds, you're done! 🎉
+
+---
+
+## 📁 Scripts Reference
+
+All scripts are in the [`scripts/`](scripts/) folder:
+
+| Script | Purpose |
+|--------|---------|
+| [`hermes-gateway-run.sh`](scripts/hermes-gateway-run.sh) | Runit service script — runs the gateway with wake lock |
+| [`boot-hermes-gateway.sh`](scripts/boot-hermes-gateway.sh) | Termux:Boot script — auto-starts on phone restart |
+| [`hermes-daemon.sh`](scripts/hermes-daemon.sh) | Management script — start/stop/restart/status/logs |
+| [`wake-checker.sh`](scripts/wake-checker.sh) | Wake checker — polls Telegram for wake commands |
+| [`dashboard-build.py`](scripts/dashboard-build.py) | Dashboard generator — creates static HTML |
+| [`dashboard-serve.py`](scripts/dashboard-serve.py) | Dashboard server — lightweight HTTP server |
+| [`dashboard.sh`](scripts/dashboard.sh) | Dashboard management — build/start/status/kill/rebuild |
 
 ---
 
@@ -416,154 +294,26 @@ The gateway has a built-in sleep/wake system to save battery when you don't need
 - `come back`
 - `/start`
 
-### Setting up the wake checker:
-
-```bash
-# Create the wake checker script
-mkdir -p ~/.hermes/scripts
-
-cat > ~/.hermes/scripts/wake-checker.sh << 'EOF'
-#!/data/data/com.termux/files/usr/bin/bash
-# Wake checker - polls Telegram for wake commands when gateway is sleeping
-# This is a lightweight script that runs as a no_agent cron job
-
-SLEEP_FLAG="$HOME/.hermes/.gateway_sleep"
-LAST_MSG_FILE="$HOME/.hermes/.last_wake_check"
-
-# If no sleep flag, we're not sleeping — exit
-if [ ! -f "$SLEEP_FLAG" ]; then
-    exit 0
-fi
-
-# Get bot token from .env
-TOKEN=$(grep "^TELEGRAM_BOT_TOKEN=" "$HOME/.hermes/.env" | cut -d= -f2-)
-if [ -z "$TOKEN" ]; then
-    echo "Error: Could not read bot token" >> "$HOME/.hermes/logs/wake-checker.log"
-    exit 1
-fi
-
-# Get the last update ID we've seen
-LAST_UPDATE_ID=""
-if [ -f "$LAST_MSG_FILE" ]; then
-    LAST_UPDATE_ID=$(cat "$LAST_MSG_FILE")
-fi
-
-# Fetch new messages from Telegram
-RESPONSE=$(curl -s "https://api.telegram.org/bot${TOKEN}/getUpdates?offset=${LAST_UPDATE_ID}&limit=10")
-
-# Parse response and check for wake commands
-RESULT=$(echo "$RESPONSE" | python3 -c "
-import json, sys, re
-
-try:
-    data = json.load(sys.stdin)
-except:
-    print(':')
-    sys.exit(0)
-
-if not data.get('ok') or not data.get('result'):
-    print(':')
-    sys.exit(0)
-
-updates = data['result']
-if not updates:
-    print(':')
-    sys.exit(0)
-
-# Get the highest update ID
-highest = max(u['update_id'] for u in updates)
-
-# Check for wake commands
-WAKE_RE = re.compile(r'\bwake\b|\bwakeup\b|/start|come\s*back', re.IGNORECASE)
-wake_id = ''
-
-for update in updates:
-    msg = update.get('message', {})
-    text = msg.get('text', '')
-    uid = msg.get('from', {}).get('id', 0)
-    
-    # Only check messages from the home chat
-    if uid == 8750175656:  # Replace with your chat ID
-        if WAKE_RE.search(text):
-            wake_id = uid
-
-print(f'{highest}:{wake_id}')
-")
-
-HIGHEST="${RESULT%%:*}"
-WAKE_ID="${RESULT#*:}"
-
-# Update the last seen message ID
-if [ -n "$HIGHEST" ]; then
-    echo "$HIGHEST" > "$LAST_MSG_FILE"
-fi
-
-# If no wake command found, we're done
-if [ -z "$WAKE_ID" ]; then
-    exit 0
-fi
-
-# === WAKE COMMAND FOUND ===
-echo "[$(date)] Wake detected (update_id=$WAKE_ID), starting gateway..." >> "$HOME/.hermes/logs/wake-checker.log"
-
-# Remove sleep flag
-rm -f "$SLEEP_FLAG"
-
-# Remove stale lock if exists
-LOCK_FILE="$HOME/.hermes/gateway.lock"
-if [ -f "$LOCK_FILE" ]; then
-    LOCK_PID=$(python3 -c "import json; print(json.load(open('$LOCK_FILE'))['pid'])" 2>/dev/null)
-    if [ -n "$LOCK_PID" ] && ! kill -0 "$LOCK_PID" 2>/dev/null; then
-        echo "[$(date)] Removing stale lock (PID $LOCK_PID)" >> "$HOME/.hermes/logs/wake-checker.log"
-        rm -f "$LOCK_FILE"
-    fi
-fi
-
-# Start the gateway service
-sv up "$HOME/.termux/services/hermes-gateway"
-
-# Wait for gateway to start (up to 30 seconds)
-for i in $(seq 1 30); do
-    if sv status "$HOME/.termux/services/hermes-gateway" 2>/dev/null | grep -q "run:"; then
-        # Re-acquire Termux wake lock
-        termux-wake-lock 2>/dev/null
-        
-        # Send notification
-        curl -s -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" \
-            -d "chat_id=${WAKE_ID}" \
-            -d "text=🟢 I'm awake! You can chat with me now." \
-            -o /dev/null &
-        
-        echo "[$(date)] Gateway up, notification sent" >> "$HOME/.hermes/logs/wake-checker.log"
-        exit 0
-    fi
-    sleep 1
-done
-
-echo "[$(date)] Gateway failed to start within 30 seconds" >> "$HOME/.hermes/logs/wake-checker.log"
-exit 1
-EOF
-
-# Make it executable
-chmod +x ~/.hermes/scripts/wake-checker.sh
-```
-
-### Create the cron job for wake checker:
-
-```bash
-# Create the cron job (runs every 2 minutes)
-hermes cron create \
-    --name "gateway-wake-checker" \
-    --schedule "*/2 * * * *" \
-    --no-agent \
-    --script ~/.hermes/scripts/wake-checker.sh
-```
-
 ---
 
 ## 📊 The Dashboard
 
-The dashboard is a static HTML page generated from your live cron data — no database, no 24/7 server.
+The dashboard is a **proof of concept** — a simple static HTML page generated from your cron data. It's designed for testing, but this is just the beginning.
+
+### What you can build:
+
+The dashboard is just a starting point. With this setup, you can build:
+
+- **Real-time monitoring dashboards** — live battery, CPU, memory stats
+- **News aggregators** — RSS feeds, AI news, tech updates
+- **Job boards** — auto-fetched listings from RemoteOK, HN, LinkedIn
+- **Social media managers** — post scheduling, analytics
+- **Personal CRM** — contact management, reminders
+- **Code playgrounds** — run and test code from your phone
+- **IoT controllers** — smart home automation
+- **AI-powered tools** — custom chatbots, content generators
+
+The possibilities are endless. The dashboard is just a starting point — go build something crazy.
 
 ### How it works:
 
@@ -585,241 +335,14 @@ The dashboard is a static HTML page generated from your live cron data — no da
 └─────────────────────────────────────────────────────┘
 ```
 
-### Setting up the dashboard:
+### Management commands:
 
 ```bash
-# Create dashboard directory
-mkdir -p ~/.hermes/dashboard
-
-# Create the dashboard generator (simplified version)
-cat > ~/.hermes/dashboard/build.py << 'EOF'
-#!/usr/bin/env python3
-"""Generate static HTML dashboard from cron data."""
-
-import json
-import os
-from datetime import datetime
-from pathlib import Path
-
-HOME = Path.home()
-CRON_DIR = HOME / ".hermes" / "cron"
-DASHBOARD_DIR = HOME / ".hermes" / "dashboard"
-OUTPUT_FILE = DASHBOARD_DIR / "index.html"
-
-def load_cron_jobs():
-    """Load all cron jobs."""
-    jobs = []
-    if CRON_DIR.exists():
-        for f in CRON_DIR.iterdir():
-            if f.suffix == '.json':
-                try:
-                    data = json.loads(f.read_text())
-                    jobs.append(data)
-                except:
-                    pass
-    return jobs
-
-def generate_html(jobs):
-    """Generate dashboard HTML."""
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
-    jobs_html = ""
-    for job in jobs:
-        name = job.get('name', 'Unknown')
-        schedule = job.get('schedule', 'N/A')
-        enabled = job.get('enabled', True)
-        status = "✅ Active" if enabled else "⏸️ Paused"
-        jobs_html += f"""
-        <tr>
-            <td>{name}</td>
-            <td>{schedule}</td>
-            <td>{status}</td>
-        </tr>
-        """
-    
-    html = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hermes Dashboard</title>
-    <style>
-        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-        body {{ 
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #0a0a0a; 
-            color: #e0e0e0; 
-            padding: 20px;
-        }}
-        .container {{ max-width: 800px; margin: 0 auto; }}
-        h1 {{ color: #00ff88; margin-bottom: 20px; }}
-        .card {{ 
-            background: #1a1a1a; 
-            border: 1px solid #333; 
-            border-radius: 8px; 
-            padding: 20px; 
-            margin-bottom: 20px; 
-        }}
-        .card h2 {{ color: #00ff88; margin-bottom: 15px; }}
-        table {{ width: 100%; border-collapse: collapse; }}
-        th, td {{ 
-            padding: 10px; 
-            text-align: left; 
-            border-bottom: 1px solid #333; 
-        }}
-        th {{ color: #00ff88; }}
-        .kill-btn {{ 
-            background: #ff4444; 
-            color: white; 
-            border: none; 
-            padding: 10px 20px; 
-            border-radius: 4px; 
-            cursor: pointer;
-            font-size: 16px;
-        }}
-        .kill-btn:hover {{ background: #ff6666; }}
-        .footer {{ 
-            text-align: center; 
-            color: #666; 
-            margin-top: 40px; 
-            font-size: 14px; 
-        }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>🧠 Hermes Dashboard</h1>
-        
-        <div class="card">
-            <h2>⏰ Scheduled Jobs</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Name</th>
-                        <th>Schedule</th>
-                        <th>Status</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {jobs_html}
-                </tbody>
-            </table>
-        </div>
-        
-        <div class="card">
-            <h2>📊 System Info</h2>
-            <p>Last updated: {now}</p>
-        </div>
-        
-        <div style="text-align: center; margin-top: 30px;">
-            <button class="kill-btn" onclick="fetch('/kill').then(() => alert('Server shutting down...'))">
-                🗡 Kill Server
-            </button>
-        </div>
-        
-        <div class="footer">
-            Pocket Hermes — An AI assistant that fits in your pocket
-        </div>
-    </div>
-</body>
-</html>"""
-    return html
-
-def main():
-    DASHBOARD_DIR.mkdir(exist_ok=True)
-    jobs = load_cron_jobs()
-    html = generate_html(jobs)
-    OUTPUT_FILE.write_text(html)
-    print(f"Dashboard generated: {OUTPUT_FILE}")
-
-if __name__ == "__main__":
-    main()
-EOF
-
-# Create the dashboard server
-cat > ~/.hermes/dashboard/serve.py << 'EOF'
-#!/usr/bin/env python3
-"""Lightweight HTTP server for the dashboard."""
-
-import http.server
-import socketserver
-import os
-import signal
-import sys
-
-PORT = 8080
-DIRECTORY = os.path.expanduser("~/.hermes/dashboard")
-
-class Handler(http.server.SimpleHTTPRequestHandler):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, directory=DIRECTORY, **kwargs)
-    
-    def do_GET(self):
-        if self.path == '/kill':
-            self.send_response(200)
-            self.send_header('Content-type', 'text/plain')
-            self.end_headers()
-            self.wfile.write(b'Server shutting down...')
-            # Shutdown after sending response
-            import threading
-            threading.Thread(target=self.server.shutdown).start()
-            return
-        return super().do_GET()
-
-def main():
-    with socketserver.TCPServer(("", PORT), Handler) as httpd:
-        print(f"Dashboard running at http://localhost:{PORT}")
-        print("Press Ctrl+C or click 'Kill Server' to stop")
-        try:
-            httpd.serve_forever()
-        except KeyboardInterrupt:
-            print("\nServer stopped")
-
-if __name__ == "__main__":
-    main()
-EOF
-
-# Create management script
-cat > ~/.hermes/dashboard.sh << 'EOF'
-#!/data/data/com.termux/files/usr/bin/bash
-# Dashboard management script
-
-DASHBOARD_DIR="$HOME/.hermes/dashboard"
-
-case "${1:-help}" in
-    build)
-        cd "$DASHBOARD_DIR" && python3 build.py
-        ;;
-    start)
-        cd "$DASHBOARD_DIR" && python3 -u serve.py
-        ;;
-    status)
-        if pgrep -f "serve.py" > /dev/null; then
-            echo "✅ Dashboard server is running"
-            echo "   URL: http://localhost:8080"
-        else
-            echo "❌ Dashboard server is not running"
-        fi
-        ;;
-    kill)
-        pkill -f "serve.py" 2>/dev/null && echo "✅ Server stopped" || echo "❌ Server not running"
-        ;;
-    rebuild)
-        cd "$DASHBOARD_DIR" && python3 build.py && python3 -u serve.py
-        ;;
-    *)
-        echo "Usage: dashboard {build|start|status|kill|rebuild}"
-        ;;
-esac
-EOF
-
-# Make scripts executable
-chmod +x ~/.hermes/dashboard/build.py
-chmod +x ~/.hermes/dashboard/serve.py
-chmod +x ~/.hermes/dashboard.sh
-
-# Add alias
-echo 'alias dashboard="bash ~/.hermes/dashboard.sh"' >> ~/.bashrc.d/hermes-daemon
+dashboard build          # Generate fresh HTML from latest data
+dashboard start          # Start server at http://localhost:8080
+dashboard status         # Shows if server is running + URL
+dashboard kill           # Stops the server immediately
+dashboard rebuild        # Build + start in one shot
 ```
 
 ---
@@ -837,8 +360,6 @@ The big question: *Does this kill my battery?*
 | Runit supervisor | ~1MB | ~0% | None |
 | **Total** | **~64MB** | **~0%** | **~2-3%/day extra** |
 
-The phone's screen, cellular radio, and other apps use way more power than this setup. The wake lock prevents deep sleep, but the CPU is still idle most of the time.
-
 ---
 
 ## ⚠️ Pitfalls to Avoid
@@ -847,7 +368,6 @@ The phone's screen, cellular radio, and other apps use way more power than this 
 - **Don't forget to open Termux:Boot once** — Android blocks boot receivers until the app is launched manually.
 - **OEM battery optimization is your enemy** — Chinese OEMs (vivo, Xiaomi, Oppo) are aggressive. Set battery to "Unrestricted" or the agent will die silently.
 - **The gateway lock file can go stale** — if the phone crashes, `~/.hermes/gateway.lock` might block restarts. Both the daemon script and wake checker auto-clean stale locks now.
-- **Termux:Boot needs to be opened after install** — Android requires this for boot receivers to work.
 
 ---
 
@@ -868,8 +388,6 @@ This setup has been tested on:
 
 ## 🛠️ Management Commands
 
-Once everything is set up, you can use these commands:
-
 ```bash
 # Gateway management
 hermes-daemon start      # Start the gateway
@@ -877,13 +395,6 @@ hermes-daemon stop       # Stop it
 hermes-daemon restart    # Restart it
 hermes-daemon status     # Check if it's running
 hermes-daemon logs       # View recent logs
-
-# Dashboard management
-dashboard build          # Generate fresh HTML from latest data
-dashboard start          # Start server at http://localhost:8080
-dashboard status         # Shows if server is running + URL
-dashboard kill           # Stops the server immediately
-dashboard rebuild        # Build + start in one shot
 
 # From Telegram (chat with your bot)
 "sleep"                  # Put the gateway to sleep
@@ -895,23 +406,11 @@ dashboard rebuild        # Build + start in one shot
 
 ---
 
-## 🔮 What's Next?
-
-The setup is modular. You can add:
-
-- **More cron jobs** — RSS monitors, price trackers, social media scrapers
-- **External access** — add a Cloudflare Tunnel to access the dashboard from anywhere
-- **Local LLM** — if you have a flagship phone (Snapdragon 8 Gen 2+), you can run small models locally
-- **Multi-platform** — connect the same agent to Discord, WhatsApp, or SMS
-- **Custom skills** — teach your agent new tricks with Hermes skills
-
----
-
 ## 📊 Final Stats
 
 | Metric | Value |
 |--------|-------|
-| **Setup time** | ~2 hours |
+| **Setup time** | ~2 hours (manual) / ~10 min (with Hermes) |
 | **Monthly cost** | $0 |
 | **Battery impact** | ~2-3%/day |
 | **RAM usage** | ~64MB |
@@ -945,7 +444,6 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## 📬 Contact
 
 - **GitHub:** [@rajgolepu](https://github.com/rajgolepu)
-- **Twitter:** [@rajgolepu](https://twitter.com/rajgolepu)
 
 ---
 
